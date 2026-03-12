@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>3D 〇×ゲーム（3x3x3） — トップ入力＋3Dキューブ表示</title>
+  <style>
+    :root{
+      --bg:#071428;
+      --card:#071e2a;
+      --muted:#9fb0c8;
+      --glass: rgba(255,255,255,0.03);
+      --p1:#2563eb; /* blue */
+      --p2:#ef4444; /* red */
+      --p3:#059669; /* green */
+      --panel-w:220px;
+      --panel-h:220px;
+      --panel-gap:40px; /* depth spacing between layers */
+    }
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;font-family:Inter, system-ui, -apple-system, 'Hiragino Kaku Gothic ProN','Yu Gothic', 'Noto Sans JP', sans-serif;background:linear-gradient(180deg,var(--bg),#041022 120%);color:#e6eef8;display:flex;align-items:center;justify-content:center;padding:20px}
+    .wrap{width:100%;max-width:1100px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.6)}
+    h1{margin:0 0 6px;font-size:20px}
+    p.lead{margin:0 0 12px;color:var(--muted);font-size:13px}
+
+    .main{display:flex;gap:18px;align-items:flex-start}
+
+    /* Left: cube scene */
+    .scene-wrap{width:var(--panel-w);display:flex;flex-direction:column;align-items:center;gap:10px}
+    .controls{display:flex;gap:8px}
+    button{padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;cursor:pointer;font-weight:700}
+
+    .scene{width:var(--panel-w);height:var(--panel-h);perspective:900px}
+    .cube{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform .25s ease}
+    .panel{position:absolute;left:50%;top:50%;width:180px;height:180px;margin-left:-90px;margin-top:-90px;border-radius:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);backface-visibility:hidden}
+    .panel .cell{display:flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(255,255,255,0.01);font-weight:800;font-size:20px;cursor:default}
+    .panel .cell.empty{opacity:0.6;color:var(--muted)}
+    .panel .cell.winner{box-shadow:0 12px 30px rgba(0,0,0,0.6);transform:scale(1.06)}
+
+    /* position three horizontal slices along z axis */
+    .panel.z0{ transform: translateZ(calc(-1 * var(--panel-gap))) translateY(8px); } /* bottom */
+    .panel.z1{ transform: translateZ(0px) translateY(-6px); } /* mid */
+    .panel.z2{ transform: translateZ(calc(var(--panel-gap))) translateY(-20px); } /* top */
+
+    /* Right: UI and layer top input */
+    .ui{flex:1;min-width:320px}
+    .layer-input{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:300px;margin-bottom:12px}
+    .layer-input button{aspect-ratio:1/1;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.02));border:1px solid rgba(255,255,255,0.04);cursor:pointer;font-weight:800}
+    .layer-input button:hover{transform:translateY(-4px)}
+    .layer-input button.disabled{opacity:0.5;cursor:not-allowed;transform:none}
+
+    .status{padding:12px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);margin-bottom:10px}
+    .turn{font-weight:800}
+    .small{color:var(--muted);font-size:13px;margin-top:6px}
+    .score{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    .score .box{padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);min-width:70px;text-align:center}
+
+    /* rotate cursor while dragging */
+    .scene.dragging{cursor:grabbing}
+
+    /* Modal should appear above everything */
+    .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,0.7);z-index:9999}
+    .dialog{background:var(--card);padding:20px;border-radius:12px;min-width:320px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 12px 40px rgba(0,0,0,0.6);color:inherit}
+    .dialog h3{margin:0}
+
+    @media (max-width:900px){
+      .main{flex-direction:column;align-items:center}
+      .layer-input{width:220px}
+      .scene-wrap{order:-1}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>3D 〇×ゲーム（3x3x3） — トップ入力＋3Dキューブ表示</h1>
+    <p class="lead">入力は上層（z=2）の3×3のみで行います。クリックすると駒がその列の最下部に落ちます（自動落下）。キューブはドラッグで回転できます。</p>
+
+    <div class="main">
+      <div class="scene-wrap">
+        <div style="font-size:13px;color:var(--muted)">3D キューブ表示（ドラッグで回転）</div>
+        <div class="scene" id="scene">
+          <div class="cube" id="cube">
+            <div class="panel z2" id="panel-z2" aria-hidden="false"></div>
+            <div class="panel z1" id="panel-z1" aria-hidden="false"></div>
+            <div class="panel z0" id="panel-z0" aria-hidden="false"></div>
+          </div>
+        </div>
+        <div class="controls">
+          <button id="rotLeft">⟲</button>
+          <button id="rotRight">⟳</button>
+          <button id="resetView">リセット</button>
+        </div>
+      </div>
+
+      <div class="ui">
+        <div class="status">
+          <div class="turn" id="turnText">ゲーム停止中</div>
+          <div class="small" id="subText">最初にプレイヤー数を選択してください（2 or 3）。</div>
+        </div>
+
+        <div style="margin-bottom:8px">上層（z=2）をクリックして駒を投入します（下が空いている場合は最下層まで落ちます）。</div>
+
+        <div class="layer-input" id="topInput"></div>
+
+        <div class="score" id="scoreArea"></div>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btnNew" class="primary">新しいゲーム</button>
+          <button id="btnClear">スコアをリセット</button>
+        </div>
+
+        <div style="margin-top:10px;color:var(--muted);font-size:13px">勝利は3つの直線（横・縦・奥行・斜め）で決まります。勝利ラインはハイライトされます。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for selecting player count -->
+  <div class="modal" id="modal">
+    <div class="dialog">
+      <h3 style="margin:0">プレイヤー数を選択</h3>
+      <p style="margin:8px 0 0;color:var(--muted)">2人または3人でプレイできます。順番はプレイヤー1→2→3（存在すれば）です。</p>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="players2">2 人でプレイ</button>
+        <button id="players3">3 人でプレイ</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Index mapping: i = x + y*3 + z*9   (x:0..2, y:0..2, z:0..2 bottom->top)
+
+    // programmatically generate all winning combos
+    (function(){
+      function idx(x,y,z){return x + y*3 + z*9}
+      const combos = new Set();
+      for(let x=0;x<3;x++)for(let y=0;y<3;y++)for(let z=0;z<3;z++){
+        for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+          if(dx===0 && dy===0 && dz===0) continue;
+          let pts = [];
+          let cx=x,cy=y,cz=z; let ok=true;
+          for(let k=0;k<3;k++){
+            if(cx>=0 && cx<3 && cy>=0 && cy<3 && cz>=0 && cz<3){
+              pts.push(idx(cx,cy,cz));
+              cx+=dx; cy+=dy; cz+=dz;
+            } else { ok=false; break; }
+          }
+          if(!ok) continue;
+          const key = pts.slice().sort((a,b)=>a-b).join(',');
+          combos.add(key);
+        }
+      }
+      window.WINNING = Array.from(combos).map(s=>s.split(',').map(n=>parseInt(n)));
+    })();
+
+    // state
+    let board = new Array(27).fill(null); // null or player index 0..2
+    let numPlayers = 2;
+    const players = [ {sym:'○', color:getComputedStyle(document.documentElement).getPropertyValue('--p1').trim()}, {sym:'✕', color:getComputedStyle(document.documentElement).getPropertyValue('--p2').trim()}, {sym:'△', color:getComputedStyle(document.documentElement).getPropertyValue('--p3').trim()} ];
+    let scores = [0,0,0];
+    let current = 0;
+    let locked = true;
+
+    // dom refs
+    const panelEls = { 0: document.getElementById('panel-z0'), 1: document.getElementById('panel-z1'), 2: document.getElementById('panel-z2') };
+    const topInput = document.getElementById('topInput');
+    const turnText = document.getElementById('turnText');
+    const subText = document.getElementById('subText');
+    const scoreArea = document.getElementById('scoreArea');
+    const btnNew = document.getElementById('btnNew');
+    const btnClear = document.getElementById('btnClear');
+    const modal = document.getElementById('modal');
+    const players2 = document.getElementById('players2');
+    const players3 = document.getElementById('players3');
+
+    // build panel cells and top input (only z=2 clickable input)
+    function makePanelCell(x,y,z){
+      const el = document.createElement('div'); el.className='cell empty'; el.dataset.x=x; el.dataset.y=y; el.dataset.z=z; el.dataset.index = x + y*3 + z*9;
+      return el;
+    }
+    function makeTopButton(x,y){
+      const btn = document.createElement('button'); btn.className=''; btn.dataset.x = x; btn.dataset.y = y; btn.title = `列 (${x+1}, ${y+1}) に落とす`;
+      btn.addEventListener('click', ()=>{ if(!locked) placeInColumn(x,y); });
+      btn.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' ') placeInColumn(x,y); });
+      return btn;
+    }
+
+    // populate panels (z2 top, z1 mid, z0 bottom)
+    for(let z=2;z>=0;z--){
+      for(let y=0;y<3;y++){
+        for(let x=0;x<3;x++){
+          panelEls[z].appendChild(makePanelCell(x,y,z));
+        }
+      }
+    }
+
+    // top input creates 3x3 buttons (z=2) for players to click
+    for(let y=0;y<3;y++){
+      for(let x=0;x<3;x++){
+        const b = makeTopButton(x,y);
+        b.textContent = `${x+1},${y+1}`;
+        topInput.appendChild(b);
+      }
+    }
+
+    function idx(x,y,z){ return x + y*3 + z*9 }
+
+    function render(){
+      for(let i=0;i<27;i++){
+        const z = Math.floor(i/9), y = Math.floor((i%9)/3), x = i%3;
+        const el = panelEls[z].querySelector(`.cell[data-index='${i}']`);
+        const val = board[i];
+        el.classList.remove('winner');
+        if(val === null){
+          el.textContent = '';
+          el.classList.add('empty');
+        } else {
+          el.textContent = players[val].sym;
+          el.classList.remove('empty');
+          el.style.color = players[val].color;
+        }
+      }
+      // update top input disabled state if column full
+      for(const btn of topInput.querySelectorAll('button')){
+        const x = parseInt(btn.dataset.x,10), y = parseInt(btn.dataset.y,10);
+        const lowest = columnLowestIndex(x,y);
+        if(lowest === null){ btn.classList.add('disabled'); btn.disabled = true; }
+        else { btn.classList.remove('disabled'); btn.disabled = false; }
+      }
+      updateTurnText();
+    }
+
+    function updateTurnText(){
+      if(locked) turnText.textContent = 'ゲーム停止中';
+      else turnText.textContent = `手番: プレイヤー ${current+1} ${players[current].sym}`;
+    }
+
+    function columnLowestIndex(x,y){
+      for(let z=0;z<3;z++){
+        const i = idx(x,y,z);
+        if(board[i] === null) return i;
+      }
+      return null;
+    }
+
+    function placeInColumn(x,y){
+      if(locked) return;
+      const spot = columnLowestIndex(x,y);
+      if(spot === null){ subText.textContent = 'この列は満杯です。'; return; }
+      board[spot] = current; // place
+      const result = checkWin();
+      render();
+      if(result){
+        endGame(result);
+        return;
+      }
+      current = (current + 1) % numPlayers;
+      updateTurnText();
+    }
+
+    function checkWin(){
+      for(const combo of window.WINNING){
+        const [a,b,c] = combo;
+        if(board[a] !== null && board[a] === board[b] && board[a] === board[c]){
+          return { winner: board[a], combo };
+        }
+      }
+      if(board.every(v=>v!==null)) return { draw:true };
+      return null;
+    }
+
+    function endGame(result){
+      locked = true;
+      if(result.winner !== undefined){
+        const w = result.winner;
+        result.combo.forEach(i=>{
+          const z = Math.floor(i/9);
+          const el = panelEls[z].querySelector(`.cell[data-index='${i}']`);
+          el.classList.add('winner');
+        });
+        scores[w]++;
+        subText.textContent = `勝者: プレイヤー ${w+1} ${players[w].sym}！`;
+      } else if(result.draw){
+        subText.textContent = '引き分けです。';
+      }
+      renderScores();
+    }
+
+    function renderScores(){
+      scoreArea.innerHTML = '';
+      for(let i=0;i<numPlayers;i++){
+        const box = document.createElement('div'); box.className='box'; box.style.minWidth='90px';
+        const label = document.createElement('div'); label.className='label'; label.textContent = `P${i+1} ${players[i].sym}`;
+        const val = document.createElement('div'); val.textContent = scores[i]; val.style.fontWeight='800'; val.style.fontSize='18px';
+        box.appendChild(label); box.appendChild(val);
+        scoreArea.appendChild(box);
+      }
+    }
+
+    // controls
+    btnNew.addEventListener('click', ()=>{
+      board.fill(null); locked=false; current=0; subText.textContent='新しいゲームを開始しました。'; render();
+    });
+    btnClear.addEventListener('click', ()=>{
+      if(!confirm('スコアをリセットしますか？')) return;
+      scores = [0,0,0]; board.fill(null); locked=false; current=0; subText.textContent='スコアをリセットしました。'; render(); renderScores();
+    });
+
+    // modal
+    players2.addEventListener('click', ()=>startGame(2));
+    players3.addEventListener('click', ()=>startGame(3));
+    function startGame(n){
+      numPlayers = n; board.fill(null); scores = [0,0,0]; locked=false; current=0;
+      if(modal.parentNode) modal.style.display='none';
+      try{ document.body.removeChild(modal); }catch(e){}
+      subText.textContent = `プレイヤー数: ${n}。プレイヤー1から開始します。`;
+      render(); renderScores();
+    }
+
+    // initialize
+    render();
+
+    // 3D cube rotation (drag + buttons)
+    const cube = document.getElementById('cube');
+    const scene = document.getElementById('scene');
+    let rotX = -20, rotY = -30; // initial angles
+    function applyRotation(){ cube.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`; }
+    applyRotation();
+
+    let dragging = false; let lastX=0, lastY=0;
+    scene.addEventListener('pointerdown', (e)=>{ dragging=true; scene.classList.add('dragging'); lastX = e.clientX; lastY = e.clientY; scene.setPointerCapture(e.pointerId); });
+    scene.addEventListener('pointermove', (e)=>{ if(!dragging) return; const dx = e.clientX - lastX; const dy = e.clientY - lastY; rotY += dx * 0.3; rotX -= dy * 0.3; lastX = e.clientX; lastY = e.clientY; applyRotation(); });
+    scene.addEventListener('pointerup', (e)=>{ dragging=false; scene.classList.remove('dragging'); scene.releasePointerCapture(e.pointerId); });
+    scene.addEventListener('pointerleave', ()=>{ dragging=false; scene.classList.remove('dragging'); });
+
+    document.getElementById('rotLeft').addEventListener('click', ()=>{ rotY -= 30; applyRotation(); });
+    document.getElementById('rotRight').addEventListener('click', ()=>{ rotY += 30; applyRotation(); });
+    document.getElementById('resetView').addEventListener('click', ()=>{ rotX=-20; rotY=-30; applyRotation(); });
+
+    // show modal on load
+    // modal already visible; user must pick players
+
+    // accessibility: keyboard numbers 1-9 map to top input positions (row-major: 1..9)
+    window.addEventListener('keydown', (e)=>{
+      if(locked) return;
+      const key = e.key;
+      if(key >= '1' && key <= '9'){
+        const n = parseInt(key,10)-1; // 0..8
+        const x = n % 3; const y = Math.floor(n/3);
+        placeInColumn(x,y);
+      }
+    });
+
+    // prevent text selection while dragging
+    document.addEventListener('selectstart', e=>{ if(dragging) e.preventDefault(); });
+
+  </script>
+</body>
+</html>
